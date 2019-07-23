@@ -22,14 +22,14 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   cat <<'DOC'
 ERROR: studio-common is designed to be sourced, not executed. Please source this file as exemplified below:
 
-  source "$(hab pkg path chef/ci-studio-common)/bin/studio-common"
+  source "$(hab pkg path chef/studio-common)/bin/studio-common"
 
 DOC
   exit 1
 fi
 
 CURL="$(hab pkg path core/curl)/bin/curl"
-DEFAULT_SUPPORTED_HAB_VERSION=$($CURL -sL https://raw.githubusercontent.com/chef/ci-studio-common/master/.hab-version)
+DEFAULT_SUPPORTED_HAB_VERSION=$($CURL -sL https://raw.githubusercontent.com/chef/studio-common/master/.hab-version)
 SUPPORTED_HAB_VERSION="${RECOMMENDED_HAB_VERSION:-$DEFAULT_SUPPORTED_HAB_VERSION}"
 export SUPPORTED_HAB_VERSION
 
@@ -160,7 +160,7 @@ if [[ -f /src/.secrets ]]; then
   echo "You are still using a .secrets file. Please switch to using HAB_STUDIO_SECRET_* instead."
 fi
 
-source_msg="Helpers from ci-studio-common"
+source_msg="Helpers from studio-common"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dot_studio_dir="$script_dir/../dot-studio"
