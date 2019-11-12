@@ -39,8 +39,53 @@ document "sup-log" <<DOC
 DOC
 add_alias "sup-log" "sl"
 
+document "enforce_hab_version" <<DOC
+  Ensure that the installed version of the hab toolchain is >= the given version.
+
+  @(arg:1) The required version of Habitat
+DOC
 function enforce_hab_version() {
-  echo "DEPRECATED: (enforce_hab_version) This functionality is now automatically executed when the studio starts."
+  CURL="$(hab pkg path core/curl)/bin/curl"
+  DEFAULT_SUPPORTED_HAB_VERSION=$($CURL -sL https://raw.githubusercontent.com/chef/studio-common/master/.hab-version)
+  SUPPORTED_HAB_VERSION="${1:-$DEFAULT_SUPPORTED_HAB_VERSION}"
+  INSTALLED_HAB_VERSION=$(hab -V | awk '{print $NF}' | cut -f1 -d/)
+  MAJOR=$(echo "$INSTALLED_HAB_VERSION"  | cut -f1 -d.)
+  MINOR=$(echo "$INSTALLED_HAB_VERSION"  | cut -f2 -d.)
+  PATCH=$(echo "$INSTALLED_HAB_VERSION"  | cut -f3 -d.)
+  R_MAJOR=$(echo "$SUPPORTED_HAB_VERSION" | cut -f1 -d.)
+  R_MINOR=$(echo "$SUPPORTED_HAB_VERSION" | cut -f2 -d.)
+  R_PATCH=$(echo "$SUPPORTED_HAB_VERSION" | cut -f3 -d.)
+  local need_upgrade=false
+  local is_newer=false
+
+  [[ $PATCH -lt $R_PATCH ]] && need_upgrade=true
+  [[ $PATCH -gt $R_PATCH ]] && is_newer=true
+
+  if [[ $MINOR -ne $R_MINOR ]]; then
+    [[ $MINOR -lt $R_MINOR ]] && need_upgrade=true || need_upgrade=false
+    [[ $MINOR -gt $R_MINOR ]] && is_newer=true || is_newer=false
+  fi
+  if [[ $MAJOR -ne $R_MAJOR ]]; then
+    [[ $MAJOR -lt $R_MAJOR ]] && need_upgrade=true || need_upgrade=false
+    [[ $MAJOR -gt $R_MAJOR ]] && is_newer=true || is_newer=false
+  fi
+
+  if $need_upgrade; then
+    echo "WARNING: This project suggests that you upgrade your Habitat installation to '$SUPPORTED_HAB_VERSION'"
+    echo "         Run:"
+    echo "         => hab studio rm"
+    echo "         to remove the studio, and then"
+    echo "         => curl https://raw.githubusercontent.com/habitat-sh/habitat/master/components/hab/install.sh | sudo bash -s -- -v $SUPPORTED_HAB_VERSION"
+  fi
+
+  if $is_newer; then
+    echo "WARNING: Habitat version '$INSTALLED_HAB_VERSION' is newer than the version of Habitat recommended for this project."
+    echo "         Please consider exiting the studio, running:"
+    echo "         => hab studio rm"
+    echo "         to remove the studio, and then"
+    echo "         => curl https://raw.githubusercontent.com/habitat-sh/habitat/master/components/hab/install.sh | sudo bash -s -- -v $SUPPORTED_HAB_VERSION"
+  fi
+
   return 0
 }
 
