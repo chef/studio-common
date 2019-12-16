@@ -27,12 +27,18 @@ document "setup_go_workspace" <<DOC
 DOC
 # shellcheck disable=SC2154
 function setup_go_workspace() {
+  # Go workspace not needed when Go Module is turned on
+  if [[ "$scaffolding_go_module" == "on" ]]; then
+    error "Go Module is enabled. Go workspace is unnecessary."
+    return 1
+  fi
+
   # Verify that we are using the Go Scaffolding
   if [[ ! "$pkg_scaffolding" =~ "scaffolding-go" ]]; then
     error "Unable to setup Go Workspace."
     error "${FUNCNAME[0]}: requires the '$(yellow pkg_scaffolding)' variable to exist in your plan.sh"
     return 2
-  fi;
+  fi
 
   # Verify if the Go Workspace has been already configured
   if [[ -n $scaffolding_go_workspace_src ]]; then
@@ -49,22 +55,44 @@ function setup_go_workspace() {
   source "$(pkg_path_for "$pkg_scaffolding")/lib/scaffolding.sh"
   if [[ "$(type -t scaffolding_load)" = "function" ]]; then
     scaffolding_load
-  fi;
+  fi
 
   if [[ "$(type -t scaffolding_go_before)" = "function" ]]; then
     scaffolding_go_before
-  fi;
+  fi
 
-  # Install go & git
-  install_if_missing core/go go
-  install_if_missing core/go gofmt
-  install_if_missing core/git git
+  # Install go
+  install_golang
+
   log_line "$(green "Available scaffolding variables:")"
   log_line "  \$scaffolding_go_gopath        - $scaffolding_go_gopath"
   log_line "  \$scaffolding_go_workspace_src - $scaffolding_go_workspace_src"
   log_line "  \$scaffolding_go_pkg_path      - $scaffolding_go_pkg_path"
 
   return 0
+}
+
+document "install_golang" <<DOC
+  Install Go programming language.
+DOC
+function install_golang() {
+  install_if_missing core/go go
+  install_if_missing core/go gofmt
+  install_if_missing core/git git
+  install_if_missing core/gcc gcc # needed to run 'go test'
+
+  # ensure GOBIN is configured
+  if [ "$GOBIN" == "" ]; then
+    export_gobin_env
+  fi
+}
+
+function export_gobin_env() {
+  if [ "$GOPATH" == "" ]; then
+    export GOBIN=$GOPATH/bin
+  else
+    export GOBIN=$HOME/go/bin
+  fi
 }
 
 # shellcheck disable=SC2154
@@ -74,7 +102,7 @@ document "enter_go_workspace" <<DOC
   It will automatically setup the Go Workspace if missing
 DOC
 function enter_go_workspace() {
-  setup_go_workspace
+  setup_go_workspace || return
   cd "$scaffolding_go_pkg_path" || return
 }
 add_alias "enter_go_workspace" "egw"
@@ -106,7 +134,12 @@ document "install_go_tool" <<DOC
   GO_TOOL_METHOD="get" install_go_tool "\${proto_go_tools[@]}"
 DOC
 function install_go_tool() {
-  setup_go_workspace
+  if [[ "$scaffolding_go_module" == "on" ]]; then
+    install_golang
+  else
+    setup_go_workspace
+  fi
+
   local go_cmd="go install -v"
   if [[ "$GO_TOOL_METHOD" == "get" ]]; then
     go_cmd="go get -u"
@@ -121,7 +154,7 @@ function install_go_tool() {
   ( cd "$GOPATH" || exit
     for tool in "$@"; do
       go_tool=$(basename "$tool")
-      if [[ ! -f "${GOPATH}/bin/${go_tool}" ]]; then
+      if [[ ! -f "${GOBIN}/${go_tool}" ]]; then
         log_line "Installing Go Tool '${go_tool}'"
         if [ "$GO_TOOL_VENDOR" == true ]; then
           go_import_path=${scaffolding_go_import_path:-$scaffolding_go_base_path/$pkg_name}
@@ -137,14 +170,14 @@ function install_go_tool() {
 document "go_build" <<DOC
   Builds the $pkg_name binary. (a.k.a. go build)
 
-  @(arg:1) The path to the go main package (default: cmd/${pkg_name}/${pkg_name}.go)
+  @(arg:1) The path to the go main package (default: main.go)
   @(arg:2) The path where the built binary file is placed.
 
   This helper will enfore the Go Workspace configureation.
 
   Example 1 :: Build a static linked binary.
   ------------------------------------------
-  GO_STATIC_BIN=true go_build main.go
+  GO_STATIC_BIN=true go_build
 
   Available extra steps before building the binary:
 
@@ -156,20 +189,26 @@ document "go_build" <<DOC
 
   Example 2 :: Build and place the binary file in a specific location.
   ------------------------------------------------------------------------
-  go_build main.go /src/bin/main
+  go_build cmd/server/main.go /src/bin/server
 DOC
 function go_build() {
-  if [[ "$1" ]]; then
-    local go_main="$1"
+  if [[ "$scaffolding_go_module" == "on" ]]; then
+    install_golang
   else
-    local go_main="cmd/${pkg_name}/${pkg_name}.go"
+    setup_go_workspace
+  fi
+
+  local go_main="main.go"
+  local go_output="-o $GOBIN/$pkg_name"
+
+  if [ "$1" ]; then
+    go_main="$1"
+    go_output=""
   fi
 
   if [ "$2" ]; then
-    local go_output="-o $2"
+    go_output="-o $2"
   fi
-
-  setup_go_workspace
 
   local go_cmd="go build ${go_output:-}"
 
@@ -224,7 +263,7 @@ add_alias "dep_ensure" "de"
 document "go_debug_mode" <<DOC
   Runs the $pkg_name in debug mode inside the studio.
 
-  @(arg:1) The path to the go main package (default: cmd/${pkg_name}/${pkg_name}.go)
+  @(arg:1) The path to the go main package (default: main.go)
 
   Example 1 :: Passing a custom go main package
   ---------------------------------------------------------
@@ -246,10 +285,10 @@ document "go_debug_mode" <<DOC
 DOC
 #shellcheck disable=2120
 function go_debug_mode() {
+  local go_main="main.go"
+
   if [[ "$1" ]]; then
-    local go_main="$1"
-  else
-    local go_main="cmd/${pkg_name}/${pkg_name}.go"
+    go_main="$1"
   fi
 
   local go_cmd="dlv debug"
@@ -260,8 +299,8 @@ function go_debug_mode() {
     return 1
   fi
 
-  # Install the debugging tooli
-  install_go_tool github.com/derekparker/delve/cmd/dlv
+  # Install the debugging tooling
+  GOFLAGS="-mod=readonly" install_go_tool github.com/go-delve/delve/cmd/dlv
 
   # Start the service dependencies if defined
   if [[ "$(type -t start_dependencies)" == "function" ]]; then
@@ -352,7 +391,7 @@ function go_debug_attach_to_pid() {
     go_cmd+=" --build-flags \"$GO_ARGS\""
   fi
 
-  install_go_tool github.com/derekparker/delve/cmd/dlv
+  GOFLAGS="-mod=readonly" install_go_tool github.com/go-delve/delve/cmd/dlv
   ( cd "$scaffolding_go_pkg_path" || exit
     log_line "Connection to PID '${1}':"
     eval "$go_cmd"
